@@ -628,20 +628,22 @@ public:
     return std::make_pair(getNoRegister(), getNoRegister());
   }
 
-  /// Analyzes if a pointer is checked to be valid by the end of BB.
+  /// Analyzes if a pointer is checked to be authenticated successfully
+  /// by the end of the basic block.
   ///
   /// It is possible for pointer authentication instructions not to terminate
-  /// the program abnormally on authentication failure and return some *invalid
-  /// pointer* instead (like it is done on AArch64 when FEAT_FPAC is not
-  /// implemented). This might be enough to crash on invalid memory access
-  /// when the pointer is later used as the destination of load/store or branch
+  /// the program abnormally on authentication failure and return some invalid
+  /// pointer instead (like it is done on AArch64 when FEAT_FPAC is not
+  /// implemented). This might be enough to crash on invalid memory access when
+  /// the pointer is later used as the destination of a load, store, or branch
   /// instruction. On the other hand, when the pointer is not used right away,
   /// it may be important for the compiler to check the address explicitly not
-  /// to introduce signing or authentication oracle.
+  /// to introduce a signing or authentication oracle.
   ///
-  /// If this function returns a (Reg, Inst) pair, then it is known that in any
-  /// successor of BB either
-  /// * Reg is trusted, provided it was safe-to-dereference before Inst, or
+  /// If this function returns a (Reg, Inst) pair and before execution of Inst
+  /// Reg was last written to by an authentication instruction, then it is known
+  /// that in any successor of BB either
+  /// * the authentication instruction that last wrote to Reg succeeded, or
   /// * the program is terminated abnormally without introducing any signing
   ///   or authentication oracles
   virtual std::optional<std::pair<MCPhysReg, MCInst *>>
@@ -652,10 +654,12 @@ public:
 
   /// Returns the register that is checked to be authenticated successfully.
   ///
-  /// If the returned register was safe-to-dereference before execution of Inst,
-  /// it becomes trusted afterward (if MayOverwrite is false) or at least does
-  /// not escape in a way usable as an authentication oracle (if MayOverwrite
-  /// is true).
+  /// If the returned register was last written to by an authentication
+  /// instruction and that authentication failed, then the program is known
+  /// to be terminated abnormally as a result of execution of Inst.
+  ///
+  /// Additionally, if MayOverwrite is false, it is known that the authenticated
+  /// pointer is not clobbered by Inst itself.
   virtual MCPhysReg getAuthCheckedReg(const MCInst &Inst,
                                       bool MayOverwrite) const {
     llvm_unreachable("not implemented");
