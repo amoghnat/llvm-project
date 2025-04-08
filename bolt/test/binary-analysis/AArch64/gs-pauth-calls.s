@@ -430,6 +430,23 @@ bad_indirect_call_mem_chain_of_auts_multi_bb:
         .size bad_indirect_call_mem_chain_of_auts_multi_bb, .-bad_indirect_call_mem_chain_of_auts_multi_bb
 
 // Tests for CFG-unaware analysis.
+//
+// All these tests use an instruction sequence like this
+//
+//      adr x2, 1f
+//      br  x2
+//    1:
+//      ; ...
+//
+// to make BOLT unable to reconstruct the control flow. Note that one can easily
+// tell whether the report corresponds to a function with or without CFG:
+// normally, the location of the gadget is described like this:
+//
+//     ... found in function <function_name>, basic block <basic block name>, at address <address>
+//
+// When CFG information is not available, this is reduced to
+//
+//     ... found in function <function_name>, at address <address>
 
         .globl  good_direct_call_nocfg
         .type   good_direct_call_nocfg,@function
@@ -556,9 +573,12 @@ obscure_indirect_call_arg_nocfg:
         mov     x29, sp
 
         autia   x0, x1 // not observed by the checker
-        b       1f     // ... because of unconditional branch
+        b       1f
 1:
-        blr     x0     // reported as non-protected
+        // The register state is pessimistically reset after a label, thus
+        // the below branch instruction is reported as non-protected - this is
+        // a known false-positive.
+        blr     x0
 
         adr     x2, 1f
         br      x2
@@ -567,6 +587,49 @@ obscure_indirect_call_arg_nocfg:
         autiasp
         ret
         .size obscure_good_indirect_call_arg_nocfg, .-obscure_good_indirect_call_arg_nocfg
+
+        .globl  safe_lr_at_function_entry_nocfg
+        .type   safe_lr_at_function_entry_nocfg,@function
+safe_lr_at_function_entry_nocfg:
+// CHECK-NOT: safe_lr_at_function_entry_nocfg
+        cbz     x0, 1f
+        ret                            // LR is safe at the start of the function
+1:
+        paciasp
+        stp     x29, x30, [sp, #-16]!
+        mov     x29, sp
+
+        adr     x2, 2f
+        br      x2
+2:
+        ldp     x29, x30, [sp], #16
+        autiasp
+        ret
+        .size safe_lr_at_function_entry_nocfg, .-safe_lr_at_function_entry_nocfg
+
+        .globl  lr_is_never_unsafe_before_first_inst_nocfg
+        .type   lr_is_never_unsafe_before_first_inst_nocfg,@function
+// CHECK-NOT: lr_is_never_unsafe_before_first_inst_nocfg
+lr_is_never_unsafe_before_first_inst_nocfg:
+1:
+        // The register state is never reset before the first instruction of
+        // the function. This can lead to a known false-negative if LR is
+        // clobbered and then a jump to the very first instruction of the
+        // function is performed.
+        paciasp
+        stp     x29, x30, [sp, #-16]!
+        mov     x29, sp
+
+        mov     x30, x0
+        cbz     x1, 1b
+
+        adr     x2, 2f
+        br      x2
+2:
+        ldp     x29, x30, [sp], #16
+        autiasp
+        ret
+        .size lr_is_never_unsafe_before_first_inst_nocfg, .-lr_is_never_unsafe_before_first_inst_nocfg
 
         .globl  bad_indirect_call_mem_nocfg
         .type   bad_indirect_call_mem_nocfg,@function
